@@ -1,5 +1,8 @@
-#include <iostream>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <string.h>
+#include <vector>
 #include "pin.H"
 
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
@@ -11,12 +14,19 @@ ofstream OutFile;
 
 #define PADSIZE 56  // 64 byte line size: 64-8
 
+typedef struct _TUP {
+  ADDRINT ptr;
+  UINT64 i;
+  int e;
+} TUP;
+
 
 class thread_data_t
 {
   public:
     thread_data_t() : _count(0) {}
     UINT64 _count;
+  vector<TUP*> calltrace;
     UINT8 _pad[PADSIZE];
 };
 
@@ -30,6 +40,131 @@ thread_data_t* get_tls(THREADID threadid)
           static_cast<thread_data_t*>(PIN_GetThreadData(tls_key, threadid));
     return tdata;
 }
+
+
+
+
+
+//////////////////////////////////////////////
+
+
+
+// Holds instruction count for a single procedure
+typedef struct RtnCount
+{
+    string _name;
+    string _image;
+    ADDRINT _address;
+    struct RtnCount * _next;
+} RTN_COUNT;
+
+
+UINT64 ctr;
+
+
+// Linked list of instruction counts for each routine
+RTN_COUNT * RtnList = 0;
+
+// This function is called before every instruction is executed
+VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
+{
+
+  RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
+  TUP *t = new TUP;
+  t->ptr=r->_address;
+  t->i=ctr;
+  t->e=1;
+
+  thread_data_t* tdata = get_tls(threadid);
+  tdata->calltrace.push_back(t);
+
+
+  ctr++;
+}
+
+VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
+{
+  RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
+
+  TUP *t = new TUP;
+  t->ptr=r->_address;
+  t->i=ctr;
+  t->e=0;
+
+  thread_data_t* tdata = get_tls(threadid);
+  tdata->calltrace.push_back(t);
+
+  ctr++;
+}
+
+    
+const char * StripPath(const char * path)
+{
+    const char * file = strrchr(path,'/');
+    if (file)
+        return file+1;
+    else
+        return path;
+}
+
+
+char *caps(char *in) {
+  int i=0;
+  while(1) {
+    if(!in[i])break;
+    if(in[i]>='a'&&in[i]<='z')in[i]-=32;
+    i++;
+  }
+  return in;
+}
+
+
+//// Pin calls this function every time a new rtn is executed
+VOID Routine(RTN rtn, VOID *v)
+{
+  char *filter[] = {
+    "C:\\WINDOWS"
+  };
+  char *image = const_cast<char *>(StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str()));
+  char imageCaps[500];
+  strcpy(imageCaps, image);
+  caps(imageCaps);
+  
+
+  int n = sizeof(filter)/sizeof(char*);
+  for(int i=0;i<n;i++) {
+    if(strstr(imageCaps, filter[i])) {
+      return;
+    }
+  }
+
+    
+    // Allocate a counter for this routine
+    RTN_COUNT * rc = new RTN_COUNT;
+
+    // The RTN goes away when the image is unloaded, so save it now
+    // because we need it in the fini
+    rc->_name = RTN_Name(rtn);
+    rc->_image = StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str());
+    rc->_address = RTN_Address(rtn);
+
+    rc->_next = RtnList;
+    RtnList = rc;
+            
+    RTN_Open(rtn);
+            
+    // Insert a call at the entry point of a routine to increment the call count
+    RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)routineEnter, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID,  IARG_END);
+    RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)routineExit, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID, IARG_END);
+    
+    RTN_Close(rtn);
+}
+
+
+/////////////////////////////////////////////
+
+
+
 
 
 VOID PIN_FAST_ANALYSIS_CALL docount(UINT32 c, THREADID threadid)
@@ -64,14 +199,22 @@ VOID Trace(TRACE trace, VOID *v)
 // This function is called when the application exits
 VOID Fini(INT32 code, VOID *v)
 {
+
+  for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next)
+    {
+      OutFile << hex << rc->_address << "," << rc->_name << endl;
+      }
+
+
+
     // Write to a file since cout and cerr maybe closed by the application
     OutFile << "Total number of threads = " << numThreads << endl;
     
-    for (INT32 t=0; t<numThreads; t++)
-    {
-        thread_data_t* tdata = get_tls(t);
-        OutFile << "Count[" << decstr(t) << "]= " << tdata->_count << endl;
-    }
+//    for (INT32 t=0; t<numThreads; t++)
+//    {
+//        thread_data_t* tdata = get_tls(t);
+//        OutFile << "Count[" << decstr(t) << "]= " << tdata->_count << endl;
+//    }
 
     OutFile.close();
 }
@@ -97,7 +240,9 @@ int main(int argc, char * argv[])
 
     PIN_AddThreadStartFunction(ThreadStart, 0);
 
-    TRACE_AddInstrumentFunction(Trace, 0);
+    //TRACE_AddInstrumentFunction(Trace, 0);
+    RTN_AddInstrumentFunction(Routine, 0);
+
 
     PIN_AddFiniFunction(Fini, 0);
 
