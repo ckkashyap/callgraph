@@ -210,11 +210,20 @@ VOID Fini(INT32 code, VOID *v)
     // Write to a file since cout and cerr maybe closed by the application
     OutFile << "Total number of threads = " << numThreads << endl;
     
-//    for (INT32 t=0; t<numThreads; t++)
-//    {
-//        thread_data_t* tdata = get_tls(t);
-//        OutFile << "Count[" << decstr(t) << "]= " << tdata->_count << endl;
-//    }
+    for (INT32 t=0; t<numThreads; t++)
+    {
+      OutFile << "Thread #" << decstr(t) << endl;
+      thread_data_t* tdata = get_tls(t);
+
+      vector<TUP*> calltrace = tdata->calltrace;
+      int size = calltrace.size();
+
+      
+      for (int i=0;i<size;i++){
+	OutFile << hex << calltrace[i]->ptr << "," << calltrace[i]->e << "," << calltrace[i]->i << endl;
+      }
+
+    }
 
     OutFile.close();
 }
