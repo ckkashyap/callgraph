@@ -5,6 +5,10 @@
 #include <vector>
 #include "pin.H"
 
+#include <intrin.h>
+
+#pragma intrinsic(__rdtsc)
+
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
     "o", "trace.out", "specify output file name");
 
@@ -72,7 +76,7 @@ VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
   TUP *t = new TUP;
   t->ptr=r->_address;
-  t->i=ctr;
+  t->i=__rdtsc();
   t->e=1;
 
   thread_data_t* tdata = get_tls(threadid);
@@ -88,7 +92,7 @@ VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
 
   TUP *t = new TUP;
   t->ptr=r->_address;
-  t->i=ctr;
+  t->i=__rdtsc();
   t->e=0;
 
   thread_data_t* tdata = get_tls(threadid);
@@ -202,7 +206,7 @@ VOID Fini(INT32 code, VOID *v)
 
   for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next)
     {
-      OutFile << hex << rc->_address << "," << rc->_name << endl;
+      OutFile << hex << rc->_address << "," << rc->_name  << "," << rc->_image << endl;
       }
 
 
