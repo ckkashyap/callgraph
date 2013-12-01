@@ -17,6 +17,7 @@ INT32 numThreads = 0;
 ofstream OutFile;
 
 #define PADSIZE 56  // 64 byte line size: 64-8
+#define BUFSIZE 1024
 
 typedef struct _TUP {
   ADDRINT ptr;
@@ -28,9 +29,28 @@ typedef struct _TUP {
 class thread_data_t
 {
   public:
-    thread_data_t() : _count(0) {}
+  thread_data_t(THREADID tid) : _count(0), calltrace(vector<TUP>(BUFSIZE)), valid(true)  {
+    string filename = KnobOutputFile.Value() + "." + decstr(tid);
+    _ofile.open(filename.c_str());
+    if ( ! _ofile )
+      {
+        cerr << "Error: could not open output file." << endl;
+        exit(1);
+      }
+    _ofile << hex;
+  }
+  ~thread_data_t() {
+    for(int i=0;i<_count;i++) {
+      _ofile << calltrace[i].ptr << "," << calltrace[i].e << "," << calltrace[i].i << endl;
+    }
+
+    _ofile.close();
+    valid=false;
+  }
+  bool valid;
+  ofstream _ofile;
     UINT64 _count;
-  vector<TUP*> calltrace;
+  vector<TUP> calltrace;
     UINT8 _pad[PADSIZE];
 };
 
@@ -80,25 +100,43 @@ VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
   t->e=1;
 
   thread_data_t* tdata = get_tls(threadid);
-  tdata->calltrace.push_back(t);
 
-
-  ctr++;
+  UINT64 index = tdata->_count;
+  tdata->calltrace[index].ptr=r->_address;
+  tdata->calltrace[index].i=__rdtsc();
+  tdata->calltrace[index].e=1;
+  index++;
+  if(index == BUFSIZE) {
+    index=0;
+    for(int i=0;i<BUFSIZE;i++) {
+      tdata->_ofile << tdata->calltrace[i].ptr << "," << tdata->calltrace[i].e << "," << tdata->calltrace[i].i << endl;
+    }
+  }
+  tdata->_count=index;
 }
 
 VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
 {
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
-
   TUP *t = new TUP;
   t->ptr=r->_address;
   t->i=__rdtsc();
-  t->e=0;
+  t->e=1;
 
   thread_data_t* tdata = get_tls(threadid);
-  tdata->calltrace.push_back(t);
 
-  ctr++;
+  UINT64 index = tdata->_count;
+  tdata->calltrace[index].ptr=r->_address;
+  tdata->calltrace[index].i=__rdtsc();
+  tdata->calltrace[index].e=0;
+  index++;
+  if(index == BUFSIZE) {
+    index=0;
+    for(int i=0;i<BUFSIZE;i++) {
+      tdata->_ofile << tdata->calltrace[i].ptr << "," << tdata->calltrace[i].e << "," << tdata->calltrace[i].i << endl;
+    }
+  }
+  tdata->_count=index;
 }
 
     
@@ -183,10 +221,18 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
     numThreads++;
     PIN_ReleaseLock(&lock);
 
-    thread_data_t* tdata = new thread_data_t;
+    thread_data_t* tdata = new thread_data_t (threadid);
 
     PIN_SetThreadData(tls_key, tdata, threadid);
 }
+VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 flags, VOID *v)
+{
+  thread_data_t* tdata = get_tls(threadid);
+  delete tdata;
+  PIN_SetThreadData(tls_key, NULL, threadid);
+}
+
+
 
 VOID Trace(TRACE trace, VOID *v)
 {
@@ -216,16 +262,15 @@ VOID Fini(INT32 code, VOID *v)
     
     for (INT32 t=0; t<numThreads; t++)
     {
-      OutFile << "Thread #" << decstr(t) << endl;
+      //OutFile << "Thread #" << decstr(t) << endl;
       thread_data_t* tdata = get_tls(t);
-
-      vector<TUP*> calltrace = tdata->calltrace;
-      int size = calltrace.size();
-
-      
-      for (int i=0;i<size;i++){
-	OutFile << hex << calltrace[i]->ptr << "," << calltrace[i]->e << "," << calltrace[i]->i << endl;
+      if(tdata) {
+	OutFile << "Thread " << t << " Was alive" << endl;
+	delete tdata;
+      }else {
+	OutFile << "Thread " << t << " Was dead" << endl;
       }
+
 
     }
 
@@ -252,6 +297,7 @@ int main(int argc, char * argv[])
     tls_key = PIN_CreateThreadDataKey(0);
 
     PIN_AddThreadStartFunction(ThreadStart, 0);
+    PIN_AddThreadFiniFunction(ThreadFini, 0);
 
     //TRACE_AddInstrumentFunction(Trace, 0);
     RTN_AddInstrumentFunction(Routine, 0);

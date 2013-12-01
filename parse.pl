@@ -3,12 +3,16 @@
 use strict;
 use warnings;
 
+my$f=$ARGV[0];
+
 my %symbols;
 my @list;
+my$threadCount = 0;
 while(<>) {
     chomp;
     s/\s*$//;
-    if (/^Total number of threads = /) {
+    if (/^Total number of threads = (\S+)/) {
+	$threadCount=$1;
 	@list=<>;
 	last;
     }
@@ -16,30 +20,30 @@ while(<>) {
     $symbols{$address} = $name;
 }
 
-my$tab=0;
-for(@list){
-    chomp;
-    s/\s*$//;
-    if (/^Thread #/) {
-	print  "-"x80,"\n";
-	print  "$_\n";
-	print  "-"x80,"\n";
-	$tab=0;
-	next;
+
+print "$threadCount\n";
+
+for my $i (0 .. $threadCount-1) {
+    open FILE, "$f.$i";
+    open OUT, ">$f.$i.processed";
+    my$tab=0;
+    while(<FILE>){
+	chomp;
+	s/\s*$//;
+	my($address,$e,$ctr)=split /,/;
+	my$name=$symbols{$address} || "NOT FOUND";
+
+	if($e){
+	    print  OUT " "x$tab;
+	    print  OUT "$name $e $ctr\n";
+	    $tab++;
+	}else {
+	    $tab--;
+	    print  OUT " "x$tab;
+	    print  OUT "$name $e $ctr\n";
+
+	}
+
+	
     }
-    my($address,$e,$ctr)=split /,/;
-    my$name=$symbols{$address} || "NOT FOUND";
-
-    if($e){
-	print  " "x$tab;
-	print  "$name $e $ctr\n";
-	$tab++;
-    }else {
-	$tab--;
-	print  " "x$tab;
-	print  "$name $e $ctr\n";
-
-    }
-
-    
 }
