@@ -11,13 +11,22 @@
 
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
     "o", "trace.out", "specify output file name");
+KNOB<string> StartSymbol(KNOB_MODE_WRITEONCE, "pintool",
+    "s", "StartSymbol", "specify the symbol to start tracing");
+KNOB<string> StopSymbol(KNOB_MODE_WRITEONCE, "pintool",
+    "e", "StopSymbol", "specify the symbol to stop tracing");
+
 
 PIN_LOCK lock;
 INT32 numThreads = 0;
 ofstream OutFile;
 
+ADDRINT startSymbolAddress, stopSymbolAddress;
+
+volatile bool guard = false;
+
 #define PADSIZE 56  // 64 byte line size: 64-8
-#define BUFSIZE 1024
+#define BUFSIZE (2048)
 
 typedef struct _TUP {
   ADDRINT ptr;
@@ -37,7 +46,9 @@ class thread_data_t
         cerr << "Error: could not open output file." << endl;
         exit(1);
       }
-    _ofile << hex;
+    _ofile;
+    _count = 0;
+    totalCount=0;
   }
   ~thread_data_t() {
     for(int i=0;i<_count;i++) {
@@ -50,6 +61,7 @@ class thread_data_t
   bool valid;
   ofstream _ofile;
     UINT64 _count;
+  UINT64 totalCount;
   vector<TUP> calltrace;
     UINT8 _pad[PADSIZE];
 };
@@ -92,14 +104,17 @@ RTN_COUNT * RtnList = 0;
 // This function is called before every instruction is executed
 VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
 {
+  if(threadid!=0)return;
 
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
-  TUP *t = new TUP;
-  t->ptr=r->_address;
-  t->i=__rdtsc();
-  t->e=1;
 
-  thread_data_t* tdata = get_tls(threadid);
+  
+
+  if(r->_address==startSymbolAddress)guard=true;
+
+  if(!guard)return;
+
+  thread_data_t* tdata = get_tls(threadid);  
 
   UINT64 index = tdata->_count;
   tdata->calltrace[index].ptr=r->_address;
@@ -117,11 +132,12 @@ VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
 
 VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
 {
+  if(threadid!=0)return;
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
-  TUP *t = new TUP;
-  t->ptr=r->_address;
-  t->i=__rdtsc();
-  t->e=1;
+
+  if(!guard)return;
+
+  if(r->_address==stopSymbolAddress)guard=false;
 
   thread_data_t* tdata = get_tls(threadid);
 
@@ -190,6 +206,16 @@ VOID Routine(RTN rtn, VOID *v)
     rc->_image = StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str());
     rc->_address = RTN_Address(rtn);
 
+
+    if(0==strcmp(RTN_Name(rtn).c_str(), StartSymbol.Value().c_str()))
+      startSymbolAddress = RTN_Address(rtn);
+
+
+    if(0==strcmp(RTN_Name(rtn).c_str(), StopSymbol.Value().c_str()))
+      stopSymbolAddress = RTN_Address(rtn);
+
+      
+
     rc->_next = RtnList;
     RtnList = rc;
             
@@ -209,11 +235,6 @@ VOID Routine(RTN rtn, VOID *v)
 
 
 
-VOID PIN_FAST_ANALYSIS_CALL docount(UINT32 c, THREADID threadid)
-{
-    thread_data_t* tdata = get_tls(threadid);
-    tdata->_count += c;
-}
 
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
@@ -234,35 +255,25 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 flags, VOID *v)
 
 
 
-VOID Trace(TRACE trace, VOID *v)
-{
-    // Visit every basic block  in the trace
-    for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-    {
-        // Insert a call to docount for every bbl, passing the number of instructions.
-        
-        BBL_InsertCall(bbl, IPOINT_ANYWHERE, (AFUNPTR)docount, IARG_FAST_ANALYSIS_CALL,
-                       IARG_UINT32, BBL_NumIns(bbl), IARG_THREAD_ID, IARG_END);
-    }
-}
 
 // This function is called when the application exits
 VOID Fini(INT32 code, VOID *v)
 {
 
+  LOG("Finish routine started\n");
+
   for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next)
     {
-      OutFile << hex << rc->_address << "," << rc->_name  << "," << rc->_image << endl;
+      OutFile << rc->_address << "," << rc->_name  << "," << rc->_image << endl;
       }
 
-
+  LOG("Finish dumping symbols\n");
 
     // Write to a file since cout and cerr maybe closed by the application
     OutFile << "Total number of threads = " << numThreads << endl;
     
     for (INT32 t=0; t<numThreads; t++)
     {
-      //OutFile << "Thread #" << decstr(t) << endl;
       thread_data_t* tdata = get_tls(t);
       if(tdata) {
 	OutFile << "Thread " << t << " Was alive" << endl;
@@ -270,11 +281,11 @@ VOID Fini(INT32 code, VOID *v)
       }else {
 	OutFile << "Thread " << t << " Was dead" << endl;
       }
-
-
     }
 
+
     OutFile.close();
+
 }
 
 INT32 Usage()
@@ -299,7 +310,6 @@ int main(int argc, char * argv[])
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddThreadFiniFunction(ThreadFini, 0);
 
-    //TRACE_AddInstrumentFunction(Trace, 0);
     RTN_AddInstrumentFunction(Routine, 0);
 
 
