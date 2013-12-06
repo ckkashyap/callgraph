@@ -15,6 +15,9 @@ KNOB<string> StartSymbol(KNOB_MODE_WRITEONCE, "pintool",
     "s", "StartSymbol", "specify the symbol to start tracing");
 KNOB<string> StopSymbol(KNOB_MODE_WRITEONCE, "pintool",
     "e", "StopSymbol", "specify the symbol to stop tracing");
+KNOB<unsigned int> BufSize(KNOB_MODE_WRITEONCE, "pintool",
+    "z", "BufSize", "BufferSize");
+
 
 
 PIN_LOCK lock;
@@ -26,7 +29,7 @@ ADDRINT startSymbolAddress, stopSymbolAddress;
 volatile bool guard = false;
 
 #define PADSIZE 56  // 64 byte line size: 64-8
-#define BUFSIZE (2048)
+unsigned int BUFSIZE;
 
 typedef struct _TUP {
   ADDRINT ptr;
@@ -37,7 +40,7 @@ typedef struct _TUP {
 
 class thread_data_t
 {
-  public:
+public:
   thread_data_t(THREADID tid) : _count(0), calltrace(vector<TUP>(BUFSIZE)), valid(true)  {
     string filename = KnobOutputFile.Value() + "." + decstr(tid);
     _ofile.open(filename.c_str());
@@ -46,7 +49,7 @@ class thread_data_t
         cerr << "Error: could not open output file." << endl;
         exit(1);
       }
-    _ofile;
+    _ofile << hex;
     _count = 0;
     totalCount=0;
   }
@@ -60,10 +63,10 @@ class thread_data_t
   }
   bool valid;
   ofstream _ofile;
-    UINT64 _count;
+  UINT64 _count;
   UINT64 totalCount;
   vector<TUP> calltrace;
-    UINT8 _pad[PADSIZE];
+  UINT8 _pad[PADSIZE];
 };
 
 
@@ -107,7 +110,6 @@ VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
   if(threadid!=0)return;
 
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
-
   
 
   if(r->_address==startSymbolAddress)guard=true;
@@ -238,16 +240,19 @@ VOID Routine(RTN rtn, VOID *v)
 
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-    PIN_GetLock(&lock, threadid+1);
-    numThreads++;
-    PIN_ReleaseLock(&lock);
+  if(threadid!=0)return;
+  PIN_GetLock(&lock, threadid+1);
+  numThreads++;
+  PIN_ReleaseLock(&lock);
+    
 
-    thread_data_t* tdata = new thread_data_t (threadid);
+  thread_data_t* tdata = new thread_data_t (threadid);
 
-    PIN_SetThreadData(tls_key, tdata, threadid);
+  PIN_SetThreadData(tls_key, tdata, threadid);
 }
 VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 flags, VOID *v)
 {
+  if(threadid!=0)return;
   thread_data_t* tdata = get_tls(threadid);
   delete tdata;
   PIN_SetThreadData(tls_key, NULL, threadid);
@@ -261,6 +266,7 @@ VOID Fini(INT32 code, VOID *v)
 {
 
   LOG("Finish routine started\n");
+  OutFile << hex;
 
   for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next)
     {
@@ -302,6 +308,8 @@ int main(int argc, char * argv[])
     if (PIN_Init(argc, argv)) return Usage();
 
     OutFile.open(KnobOutputFile.Value().c_str());
+    BUFSIZE = BufSize.Value();
+    LOG ("Size = " + decstr(BUFSIZE) + "\n");
 
     PIN_InitLock(&lock);
 
