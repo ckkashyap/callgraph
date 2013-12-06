@@ -11,9 +11,9 @@
 
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
     "o", "trace.out", "specify output file name");
-KNOB<string> StartSymbol(KNOB_MODE_WRITEONCE, "pintool",
+KNOB<ADDRINT> StartSymbol(KNOB_MODE_WRITEONCE, "pintool",
     "s", "StartSymbol", "specify the symbol to start tracing");
-KNOB<string> StopSymbol(KNOB_MODE_WRITEONCE, "pintool",
+KNOB<ADDRINT> StopSymbol(KNOB_MODE_WRITEONCE, "pintool",
     "e", "StopSymbol", "specify the symbol to stop tracing");
 KNOB<unsigned int> BufSize(KNOB_MODE_WRITEONCE, "pintool",
     "z", "2048", "BufferSize");
@@ -106,58 +106,51 @@ UINT64 ctr;
 // Linked list of instruction counts for each routine
 RTN_COUNT * RtnList = 0;
 
+VOID PIN_FAST_ANALYSIS_CALL startRoutineEnter(UINT64 *counter , THREADID threadid)
+{
+  if(threadid!=0)return;
+  RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
+  thread_data_t* tdata = get_tls(threadid);  
+  tdata->_ofile << r->_address << "," << 1 << endl;
+  guard=true;
+}
+
+VOID PIN_FAST_ANALYSIS_CALL stopRoutineExit(UINT64 *counter , THREADID threadid)
+{
+  if(threadid!=0)return;
+  guard=false;
+  RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
+  thread_data_t* tdata = get_tls(threadid);  
+  tdata->_ofile << r->_address << "," << 0 << endl;
+}
+
+
+
 // This function is called before every instruction is executed
 VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
 {
+  if(!guard)return;
   if(threadid!=0)return;
 
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
-  
-
-  if(r->_address==startSymbolAddress)guard=true;
-
-  if(!guard)return;
-
+ 
   thread_data_t* tdata = get_tls(threadid);  
 
-  UINT64 index = tdata->_count;
-  tdata->calltrace[index].ptr=r->_address;
-  //  tdata->calltrace[index].i=__rdtsc();
-  tdata->calltrace[index].e=1;
-  index++;
-  if(index == BUFSIZE) {
-    index=0;
-    for(int i=0;i<BUFSIZE;i++) {
-      tdata->_ofile << tdata->calltrace[i].ptr << "," << tdata->calltrace[i].e << "," << tdata->calltrace[i].i << endl;
-    }
-  }
-  tdata->_count=index;
+  tdata->_ofile << r->_address << "," <<  1 << endl;
 }
 
 VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
 {
-  if(threadid!=0)return;
-  RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
-
   if(!guard)return;
+  if(threadid!=0)return;
 
-  if(r->_address==stopSymbolAddress)guard=false;
+  RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
+ 
+  thread_data_t* tdata = get_tls(threadid);  
 
-  thread_data_t* tdata = get_tls(threadid);
-
-  UINT64 index = tdata->_count;
-  tdata->calltrace[index].ptr=r->_address;
-  //  tdata->calltrace[index].i=__rdtsc();
-  tdata->calltrace[index].e=0;
-  index++;
-  if(index == BUFSIZE) {
-    index=0;
-    for(int i=0;i<BUFSIZE;i++) {
-      tdata->_ofile << tdata->calltrace[i].ptr << "," << tdata->calltrace[i].e << "," << tdata->calltrace[i].i << endl;
-    }
-  }
-  tdata->_count=index;
+  tdata->_ofile << r->_address << "," << 0 << endl;
 }
+
 
     
 const char * StripPath(const char * path)
@@ -201,33 +194,36 @@ VOID Routine(RTN rtn, VOID *v)
   }
 
     
-    // Allocate a counter for this routine
-    RTN_COUNT * rc = new RTN_COUNT;
+  // Allocate a counter for this routine
+  RTN_COUNT * rc = new RTN_COUNT;
 
-    // The RTN goes away when the image is unloaded, so save it now
-    // because we need it in the fini
-    rc->_name = RTN_Name(rtn);
-    rc->_image = StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str());
-    rc->_address = RTN_Address(rtn);
-
-
-    if(0==strcmp(RTN_Name(rtn).c_str(), StartSymbol.Value().c_str()))
-      startSymbolAddress = RTN_Address(rtn);
+  // The RTN goes away when the image is unloaded, so save it now
+  // because we need it in the fini
+  rc->_name = RTN_Name(rtn);
+  rc->_image = StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str());
+  rc->_address = RTN_Address(rtn);
 
 
-    if(0==strcmp(RTN_Name(rtn).c_str(), StopSymbol.Value().c_str()))
-      stopSymbolAddress = RTN_Address(rtn);
-
-      
 
     rc->_next = RtnList;
     RtnList = rc;
+
+    //    LOG(rc->_name + "\n");
             
     RTN_Open(rtn);
             
     // Insert a call at the entry point of a routine to increment the call count
-    RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)routineEnter, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID,  IARG_END);
-    RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)routineExit, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID, IARG_END);
+    if (rc->_address == startSymbolAddress) {
+      RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)startRoutineEnter, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID,  IARG_END);
+    }else {
+      RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)routineEnter, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID,  IARG_END);
+    }
+
+    if (rc->_address == stopSymbolAddress) {    
+      RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)stopRoutineExit, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID, IARG_END);
+    } else {
+      RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)routineExit, IARG_FAST_ANALYSIS_CALL, IARG_PTR, reinterpret_cast<UINT64*>(rc), IARG_THREAD_ID, IARG_END);
+    }
     
     RTN_Close(rtn);
 }
@@ -314,6 +310,12 @@ int main(int argc, char * argv[])
     OutFile.open(KnobOutputFile.Value().c_str());
     BUFSIZE = BufSize.Value();
     LOG ("Size = " + decstr(BUFSIZE) + "\n");
+
+    startSymbolAddress = StartSymbol.Value();
+    stopSymbolAddress = StopSymbol.Value();
+
+    LOG ( "start address = " + hexstr(startSymbolAddress) + "\n");
+    LOG ( "stop address = " + hexstr(stopSymbolAddress) + "\n");
 
     PIN_InitLock(&lock);
 
