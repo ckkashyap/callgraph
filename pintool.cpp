@@ -16,7 +16,7 @@ KNOB<string> StartSymbol(KNOB_MODE_WRITEONCE, "pintool",
 KNOB<string> StopSymbol(KNOB_MODE_WRITEONCE, "pintool",
     "e", "StopSymbol", "specify the symbol to stop tracing");
 KNOB<unsigned int> BufSize(KNOB_MODE_WRITEONCE, "pintool",
-    "z", "BufSize", "BufferSize");
+    "z", "2048", "BufferSize");
 
 
 
