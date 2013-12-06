@@ -17,6 +17,8 @@ KNOB<string> StopSymbol(KNOB_MODE_WRITEONCE, "pintool",
     "e", "StopSymbol", "specify the symbol to stop tracing");
 KNOB<unsigned int> BufSize(KNOB_MODE_WRITEONCE, "pintool",
     "z", "2048", "BufferSize");
+KNOB<bool> DumpSymbol(KNOB_MODE_WRITEONCE, "pintool",
+    "b", "1", "dump symbols");
 
 
 
@@ -266,12 +268,14 @@ VOID Fini(INT32 code, VOID *v)
 {
 
   LOG("Finish routine started\n");
-  OutFile << hex;
 
-  for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next)
-    {
+  if(DumpSymbol.Value()) {
+    OutFile << hex;
+
+    for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next) {
       OutFile << rc->_address << "," << rc->_name  << "," << rc->_image << endl;
-      }
+    }
+  }
 
   LOG("Finish dumping symbols\n");
 
