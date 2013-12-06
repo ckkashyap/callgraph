@@ -122,7 +122,7 @@ VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
 
   UINT64 index = tdata->_count;
   tdata->calltrace[index].ptr=r->_address;
-  tdata->calltrace[index].i=__rdtsc();
+  //  tdata->calltrace[index].i=__rdtsc();
   tdata->calltrace[index].e=1;
   index++;
   if(index == BUFSIZE) {
@@ -147,7 +147,7 @@ VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
 
   UINT64 index = tdata->_count;
   tdata->calltrace[index].ptr=r->_address;
-  tdata->calltrace[index].i=__rdtsc();
+  //  tdata->calltrace[index].i=__rdtsc();
   tdata->calltrace[index].e=0;
   index++;
   if(index == BUFSIZE) {
