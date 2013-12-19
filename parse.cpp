@@ -9,8 +9,9 @@ SymbolTable getSymbolTable(std::string symbolFileName) {
   std::ifstream traceFile(symbolFileName);
   std::regex regularExpression ("(.*?);(.*?);(.*)");
   SymbolTable table {};
-  char buffer[1024];
-  while((traceFile.getline(buffer,1024)) && !traceFile.eof()) {
+  const int maxLineLength {4096};
+  char buffer[maxLineLength];
+  while((traceFile.getline(buffer,maxLineLength)) && !traceFile.eof()) {
     std::string line {buffer};
     std::smatch sm {};
     if(std::regex_match(line, sm, regularExpression)) {
