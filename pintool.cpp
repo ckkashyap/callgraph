@@ -32,14 +32,15 @@ volatile bool guard = false;
 
 typedef struct _TUP {
   ADDRINT ptr;
-  int call;
+  int call;  
 } TUP;
 
+const int BufferSize=4096;
 
 class thread_data_t
 {
 public:
-  thread_data_t(THREADID tid) : calltrace(vector<TUP*>()) {
+  thread_data_t(THREADID tid) : calltrace(vector<TUP*>(BufferSize)), index(0) {
     string filename = KnobOutputFile.Value() + ".thread" + decstr(tid) ;
     _ofile.open(filename.c_str());
     if ( ! _ofile )
@@ -53,15 +54,15 @@ public:
     LOG("Destroying thread data\n");
     unsigned int size = calltrace.size();
     LOG("Size = " + decstr(size) + "\n");    
-    for (unsigned int i=0;i<size; i++ ){
+    for (unsigned int i=0;i<index; i++ ){
       TUP *t = calltrace[i];
       _ofile << t->ptr << ";" << t->call << endl;
-
     }
     LOG("Finished writing\n");    
     _ofile.close();
   }
   ofstream _ofile;
+  int index;
   vector<TUP *> calltrace;
   UINT8 _pad[PADSIZE];
 };
@@ -86,6 +87,17 @@ typedef struct RtnCount
 // Linked list of instruction counts for each routine
 RTN_COUNT * RtnList = 0;
 
+void writeToDisk(TUP *t) {
+  tdata->calltrace[tdata->index]=t;
+  tdata->index++;
+  if(tdata->index==BufferSize){
+    for(int i=0;i<BufferSize;i++){
+      tdata->_ofile << t->ptr << ";" << t->call << endl;
+    }
+    tdata->index=0;
+  }
+}
+
 VOID PIN_FAST_ANALYSIS_CALL startRoutineEnter(UINT64 *counter , THREADID threadid)
 {
   if(threadid!=0)return;
@@ -93,7 +105,8 @@ VOID PIN_FAST_ANALYSIS_CALL startRoutineEnter(UINT64 *counter , THREADID threadi
   TUP *t = new TUP;
   t->ptr=r->_address;
   t->call=1;
-  tdata->calltrace.push_back(t);
+  //  tdata->calltrace.push_back(t);
+  writeToDisk(t);
   guard=true;
   LOG("Started logging\n");
 }
@@ -108,7 +121,8 @@ VOID PIN_FAST_ANALYSIS_CALL stopRoutineEnter(UINT64 *counter , THREADID threadid
   TUP *t = new TUP;
   t->ptr=r->_address;
   t->call=1;
-  tdata->calltrace.push_back(t);
+  //  tdata->calltrace.push_back(t);
+  writeToDisk(t);
 }
 
 
@@ -124,7 +138,8 @@ VOID PIN_FAST_ANALYSIS_CALL routineEnter(UINT64 *counter , THREADID threadid)
   TUP *t = new TUP;
   t->ptr=r->_address;
   t->call=1;
-  tdata->calltrace.push_back(t);
+  //tdata->calltrace.push_back(t);
+  writeToDisk(t);
 
 }
 
@@ -138,7 +153,8 @@ VOID PIN_FAST_ANALYSIS_CALL routineExit(UINT64 *counter , THREADID threadid)
   TUP *t = new TUP;
   t->ptr=r->_address;
   t->call=0;
-  tdata->calltrace.push_back(t);
+  //tdata->calltrace.push_back(t);
+  writeToDisk(t);
 }
 
 
