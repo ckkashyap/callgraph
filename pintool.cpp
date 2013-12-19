@@ -101,6 +101,7 @@ VOID PIN_FAST_ANALYSIS_CALL startRoutineEnter(UINT64 *counter , THREADID threadi
 VOID PIN_FAST_ANALYSIS_CALL stopRoutineEnter(UINT64 *counter , THREADID threadid)
 {
   if(threadid!=0)return;
+  if(!guard)return;
   guard=false;
   LOG("Stopped logging\n");
   RTN_COUNT *r = reinterpret_cast<RTN_COUNT*>(counter);
