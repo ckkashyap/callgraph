@@ -55,7 +55,7 @@ public:
     LOG("Size = " + decstr(size) + "\n");    
     for (unsigned int i=0;i<size; i++ ){
       TUP *t = calltrace[i];
-      _ofile << t->ptr << ", " << t->call << endl;
+      _ofile << t->ptr << ";" << t->call << endl;
 
     }
     LOG("Finished writing\n");    
@@ -235,7 +235,7 @@ VOID Fini(INT32 code, VOID *v)
   OutFile << hex;
 
   for (RTN_COUNT * rc = RtnList; rc; rc = rc->_next) {
-    OutFile << rc->_address << "," << rc->_name  << "," << rc->_image << endl;
+    OutFile << rc->_address << ";" << rc->_name  << ";" << rc->_image << endl;
   }
   OutFile.close();    
 
